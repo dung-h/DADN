@@ -6,9 +6,18 @@ import cv2
 import numpy as np
 from PIL import Image, ImageDraw, ImageFont
 
-from config import CAMERA_INDEX, FRAME_HEIGHT, FRAME_WIDTH, INFER_EVERY_N_FRAMES
+from config import (
+    CAMERA_INDEX,
+    ESP32_CAMERA_PREVIEW_MODE,
+    ESP32_CAMERA_URL,
+    FRAME_HEIGHT,
+    FRAME_WIDTH,
+    INFER_EVERY_N_FRAMES,
+    USE_ESP32_CAMERA,
+)
 from decision_engine import DecisionEngine
 from detector import ObstacleDetector
+from esp32_camera import ESP32CameraCapture
 from model_utils import ensure_model
 from tts_engine import VoiceAlertManager
 
@@ -37,7 +46,7 @@ def draw_overlay(frame, obstacle, fps: float):
     )
 
     if obstacle is None:
-        frame = put_text_utf8(frame, "Không có vật cản ưu tiên", (10, 65), fontsize=18, color=(0, 255, 255))
+        frame = put_text_utf8(frame, "No priority obstacle", (10, 65), fontsize=18, color=(0, 255, 255))
         return frame
 
     cv2.rectangle(
@@ -48,8 +57,12 @@ def draw_overlay(frame, obstacle, fps: float):
         2,
     )
     text = f"{obstacle.label} | {obstacle.distance_level} | {obstacle.horizontal_zone}"
+    if obstacle.ttc_seconds is not None:
+        text += f" | TTC~{obstacle.ttc_seconds:.1f}s"
     frame = put_text_utf8(frame, text, (obstacle.x, max(20, obstacle.y - 10)), fontsize=16, color=(0, 255, 0))
-    
+
+    source_text = f"risk: {obstacle.risk_source}"
+    frame = put_text_utf8(frame, source_text, (10, 65), fontsize=16, color=(120, 240, 240))
     frame = put_text_utf8(frame, obstacle.spoken_text, (10, FRAME_HEIGHT - 20), fontsize=16, color=(50, 220, 50))
     return frame
 
@@ -61,14 +74,58 @@ def main() -> None:
     decider = DecisionEngine(frame_width=FRAME_WIDTH, frame_height=FRAME_HEIGHT)
     voice = VoiceAlertManager()
 
-    cap = cv2.VideoCapture(CAMERA_INDEX)
+    if USE_ESP32_CAMERA:
+        print(f"[INFO] Connecting to ESP32 camera at {ESP32_CAMERA_URL}...")
+        cap = ESP32CameraCapture(ESP32_CAMERA_URL)
+        camera_source = f"ESP32 ({ESP32_CAMERA_URL})"
+    else:
+        cap = cv2.VideoCapture(CAMERA_INDEX)
+        camera_source = f"Local Camera (index {CAMERA_INDEX})"
+
     if not cap.isOpened():
-        raise RuntimeError("Khong mo duoc camera. Thu doi CAMERA_INDEX trong config.py")
+        raise RuntimeError(
+            f"Cannot open camera: {camera_source}\n"
+            f"Check config.py or the ESP32 camera IP."
+        )
 
     cap.set(cv2.CAP_PROP_FRAME_WIDTH, FRAME_WIDTH)
     cap.set(cv2.CAP_PROP_FRAME_HEIGHT, FRAME_HEIGHT)
 
-    print("Nhan q de thoat.")
+    print(f"✓ Camera source: {camera_source}")
+
+    # Preview mode
+    if ESP32_CAMERA_PREVIEW_MODE:
+        print("[PREVIEW] Press 's' to start detection, 'q' to quit.")
+        detection_active = False
+        preview_frame_count = 0
+        while not detection_active:
+            ok, frame = cap.read()
+            if not ok:
+                break
+            frame = cv2.resize(frame, (FRAME_WIDTH, FRAME_HEIGHT))
+            preview_frame_count += 1
+            
+            if preview_frame_count % 10 == 0:
+                frame = put_text_utf8(
+                    frame, 
+                    "[PREVIEW] Press 's' to start detection", 
+                    (10, FRAME_HEIGHT - 20), 
+                    fontsize=16, 
+                    color=(0, 255, 255)
+                )
+            
+            cv2.imshow("Obstacle Warning - PREVIEW MODE", frame)
+            key = cv2.waitKey(1) & 0xFF
+            if key == ord('s'):
+                detection_active = True
+                cv2.destroyAllWindows()
+                print("[DETECTION] Started. Press q to quit.")
+            elif key == ord('q'):
+                cap.release()
+                cv2.destroyAllWindows()
+                return
+
+    print("Press q to quit.")
 
     frame_count = 0
     start_time = time.time()
@@ -77,7 +134,7 @@ def main() -> None:
     while True:
         ok, frame = cap.read()
         if not ok:
-            print("Khong doc duoc frame tu camera.")
+            print("Cannot read frame from camera.")
             break
 
         frame = cv2.resize(frame, (FRAME_WIDTH, FRAME_HEIGHT))
@@ -85,11 +142,17 @@ def main() -> None:
 
         if frame_count % INFER_EVERY_N_FRAMES == 0:
             detections = detector.detect(frame)
-            current_obstacle = decider.choose_alert(detections)
+            current_obstacle = decider.choose_alert(detections, timestamp=time.monotonic())
             if current_obstacle:
+                ttc_text = (
+                    f" | ttc={current_obstacle.ttc_seconds:.2f}s"
+                    if current_obstacle.ttc_seconds is not None
+                    else ""
+                )
                 print(
                     f"[ALERT] {current_obstacle.label} | {current_obstacle.distance_level} | "
-                    f"{current_obstacle.horizontal_zone} | priority={current_obstacle.priority:.2f}"
+                    f"{current_obstacle.horizontal_zone} | source={current_obstacle.risk_source}"
+                    f"{ttc_text} | priority={current_obstacle.priority:.2f}"
                 )
             voice.maybe_speak(current_obstacle)
 

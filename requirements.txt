@@ -2,3 +2,6 @@ mediapipe
 opencv-python
 numpy
 pyttsx3
+flask
+pillow
+requests

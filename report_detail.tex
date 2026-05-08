@@ -1,0 +1,265 @@
+\documentclass[11pt, a4paper]{article}
+
+% --- UNIVERSAL PREAMBLE BLOCK ---
+\usepackage[a4paper, top=2.3cm, bottom=2.3cm, left=2cm, right=2cm]{geometry}
+\usepackage{fontspec}
+\usepackage[vietnamese, bidi=basic, provide=*]{babel}
+\babelprovide[import, onchar=ids fonts]{vietnamese}
+\babelprovide[import, onchar=ids fonts]{english}
+\babelfont{rm}{Noto Sans}
+\babelfont[vietnamese]{rm}{Noto Sans}
+\usepackage{enumitem}
+\setlist[itemize]{label=-, itemsep=2pt, topsep=2pt}
+% ---------------------------------
+
+\usepackage{tabularx}
+\usepackage{array}
+\usepackage{xcolor}
+\usepackage{booktabs}
+\usepackage{longtable}
+\usepackage{titlesec}
+\usepackage{hyperref}
+\hypersetup{colorlinks=true, linkcolor=black, urlcolor=blue}
+
+\titleformat{\section}{\large\bfseries}{\thesection.}{0.5em}{}
+\titlespacing*{\section}{0pt}{1.2ex plus 0.8ex minus .2ex}{0.8ex plus .2ex}
+\titleformat{\subsection}{\normalsize\bfseries}{\thesubsection.}{0.5em}{}
+\titlespacing*{\subsection}{0pt}{0.8ex plus 0.5ex minus .2ex}{0.4ex plus .2ex}
+
+\renewcommand{\arraystretch}{1.25}
+\setlength{\parskip}{4pt}
+\setlength{\parindent}{0pt}
+
+\begin{document}
+
+\begin{center}
+    {\Large\textbf{ĐỒ ÁN ĐA NGÀNH HƯỚNG TRÍ TUỆ NHÂN TẠO}}\\[0.25cm]
+    {\large\textbf{Tên đề tài: Hệ Thống Cảnh Báo Vật Cản Bằng Giọng Nói Cho Người Khiếm Thị Ứng Dụng Mạng TinyML}}\\[0.35cm]
+    {\normalsize\textbf{Bản mô tả chi tiết đề tài và chiến lược triển khai}}
+\end{center}
+
+\textbf{Giảng viên hướng dẫn:} Tiến sĩ Võ Tuấn Bình \\
+\textbf{Nhóm sinh viên thực hiện:}
+\begin{itemize}[itemsep=0pt, parsep=0pt, topsep=2pt]
+    \item 1. Nguyễn Đăng Hiên - 2310936
+    \item 2. Lê Nguyễn Kim Khôi - 2311671
+    \item 3. Bùi Ngọc Phúc - 2312665
+    \item 4. Hồ Anh Dũng - 2310543
+    \item 5. Cao Hữu Thiên Hoàng - 2311030
+\end{itemize}
+
+\section*{1. Tóm tắt ý tưởng}
+Đề tài hướng tới việc xây dựng một hệ thống trợ thị thông minh, gọn nhẹ dành cho người khiếm thị. Hệ thống sử dụng camera để thu nhận hình ảnh phía trước, sau đó xử lý trực tiếp trên thiết bị nhúng bằng mô hình nhận diện vật thể cỡ nhỏ \textit{EfficientDet-Lite0}. Khi phát hiện vật cản có khả năng gây nguy hiểm cho quá trình di chuyển, hệ thống không chỉ nhận diện tên vật thể mà còn thực hiện bước suy luận để xác định \textbf{mức độ cảnh báo} theo các tiêu chí như loại vật thể, vị trí trong khung hình và mức gần--xa tương đối. Kết quả cuối cùng được chuyển thành câu cảnh báo bằng giọng nói phát ra loa ngoài, hỗ trợ người dùng chủ động né tránh vật cản theo thời gian thực.
+
+Điểm nhấn của đề tài không nằm ở việc huấn luyện mô hình từ đầu, mà ở việc tích hợp một pipeline hoàn chỉnh trên thiết bị nhúng: \textbf{Camera $\rightarrow$ Object Detection $\rightarrow$ Decision Engine $\rightarrow$ Text-to-Speech}. Cách tiếp cận này giúp nhóm tập trung vào tính ứng dụng thực tế, khả năng chạy trực tiếp trên Raspberry Pi và tính khả thi trong thời gian triển khai ngắn.
+
+\section*{2. Mục tiêu và Giới hạn đề tài}
+\begin{itemize}
+    \item \textbf{Mục tiêu chính:} Xây dựng một hệ thống có khả năng phát hiện các vật cản cơ bản phía trước người dùng và phát cảnh báo giọng nói theo thời gian thực.
+    \item \textbf{Mục tiêu kỹ thuật:}
+    \begin{itemize}
+        \item Nhận diện được các nhóm vật cản quan trọng như người, xe đạp, xe máy, ô tô, xe buýt, xe tải và một số vật cản tĩnh lớn.
+        \item Ước lượng mức gần--xa tương đối của vật cản theo ba mức: \textit{xa, trung bình, gần}.
+        \item Ưu tiên cảnh báo vật thể nguy hiểm nhất thay vì đọc toàn bộ vật thể xuất hiện trong khung hình.
+        \item Phát cảnh báo bằng giọng nói ngắn gọn, rõ ràng, hạn chế lặp lại gây nhiễu cho người dùng.
+    \end{itemize}
+    \item \textbf{Giới hạn đề tài:}
+    \begin{itemize}
+        \item Không huấn luyện mô hình từ đầu, ưu tiên sử dụng mô hình \textit{pre-trained} để tiết kiệm thời gian.
+        \item Không đo khoảng cách tuyệt đối theo đơn vị mét; hệ thống chỉ ước lượng khoảng cách tương đối dựa trên đặc trưng hình ảnh.
+        \item Chưa xử lý đầy đủ mọi điều kiện phức tạp như trời tối, mưa lớn, ánh sáng ngược mạnh hoặc môi trường quá đông đúc.
+        \item Hệ thống đóng vai trò \textit{hỗ trợ cảnh báo}, không thay thế hoàn toàn các công cụ hỗ trợ khác như gậy dò đường.
+    \end{itemize}
+\end{itemize}
+
+\section*{3. Study Case và Bối cảnh sử dụng}
+\subsection*{3.1. Người dùng mục tiêu}
+Người dùng mục tiêu là người khiếm thị hoặc người có thị lực rất kém, có nhu cầu di chuyển độc lập trong các không gian quen thuộc như hành lang trường học, khuôn viên trường, vỉa hè, lối đi bộ hoặc khu dân cư.
+
+\subsection*{3.2. Bối cảnh sử dụng thực tế}
+Thiết bị được giả định gắn ở trước ngực hoặc cầm theo hướng camera nhìn về phía trước. Trong quá trình di chuyển, người dùng có thể gặp các vật cản như người đi bộ, xe máy dựng trên lối đi, ghế, cột hoặc vật chắn bất ngờ. Hệ thống cần phát hiện kịp thời các vật cản xuất hiện trên hướng di chuyển chính và đưa ra cảnh báo đơn giản, dễ hiểu như ``Có người phía trước'' hoặc ``Cẩn thận, xe máy ở gần bên phải''.
+
+\subsection*{3.3. Các kịch bản tiêu biểu}
+\begin{itemize}
+    \item \textbf{Kịch bản 1 -- Hành lang hoặc sân trường:} Hệ thống phát hiện người hoặc ghế chắn giữa lối đi và cảnh báo để người dùng đổi hướng.
+    \item \textbf{Kịch bản 2 -- Vỉa hè hoặc lối đi ngoài trời:} Hệ thống phát hiện xe máy, xe đạp hoặc thùng rác lấn chiếm lối đi.
+    \item \textbf{Kịch bản 3 -- Vật cản xuất hiện gần:} Khi một người hoặc phương tiện tiếp cận ở khoảng cách ngắn, hệ thống ưu tiên phát cảnh báo sớm và rõ ràng.
+\end{itemize}
+
+\section*{4. Kiến trúc hệ thống đề xuất}
+Hệ thống gồm bốn khối chức năng chính thay vì chỉ ba khối cơ bản. Việc bổ sung khối \textbf{Decision Engine} giúp biến mô hình nhận diện thành một hệ thống cảnh báo có logic sử dụng thực tế.
+
+\begin{enumerate}[itemsep=3pt, topsep=3pt]
+    \item \textbf{Khối đầu vào (Input):} Camera USB hoặc camera CSI thu khung hình liên tục theo thời gian thực.
+    \item \textbf{Khối nhận diện (Object Detection):} Raspberry Pi chạy mô hình \textit{EfficientDet-Lite0} thông qua TensorFlow Lite/MediaPipe để trích xuất danh sách vật thể gồm nhãn, độ tin cậy và khung bao quanh \textit{bounding box}.
+    \item \textbf{Khối ra quyết định (Decision Engine):} Hệ thống phân tích các phát hiện thô, lọc vật thể cần quan tâm, ước lượng gần--xa tương đối, xác định vị trí trái--giữa--phải và tính điểm ưu tiên để chọn vật thể nguy hiểm nhất cần cảnh báo.
+    \item \textbf{Khối đầu ra (Output):} Thư viện Text-to-Speech như \texttt{pyttsx3} sinh câu nói phù hợp và phát qua loa ngoài.
+\end{enumerate}
+
+\subsection*{4.1. Luồng xử lý tổng quát}
+\begin{center}
+\fbox{\parbox{0.94\textwidth}{
+Camera $\rightarrow$ Tiền xử lý khung hình $\rightarrow$ EfficientDet-Lite0 $\rightarrow$ Danh sách detection $\rightarrow$ Lọc đối tượng $\rightarrow$ Ước lượng gần--xa $\rightarrow$ Chấm điểm nguy hiểm $\rightarrow$ Chọn vật ưu tiên cao nhất $\rightarrow$ Sinh câu cảnh báo $\rightarrow$ Phát âm thanh
+}}
+\end{center}
+
+\section*{5. Lựa chọn mô hình và lý do}
+Sau khi cân nhắc giữa một số mạng gọn nhẹ như SSD MobileNet, YOLO cỡ nhỏ và EfficientDet-Lite, nhóm lựa chọn \textbf{EfficientDet-Lite0} làm mô hình chính vì các lý do sau:
+\begin{itemize}
+    \item Kích thước nhỏ, phù hợp với thiết bị nhúng như Raspberry Pi 4.
+    \item Cân bằng tốt giữa độ chính xác và tốc độ suy luận.
+    \item Có sẵn mô hình \textit{pre-trained} ở định dạng \texttt{.tflite}, thuận tiện cho việc triển khai nhanh.
+    \item Dễ tích hợp với Python và hệ sinh thái TensorFlow Lite/MediaPipe.
+\end{itemize}
+
+Mô hình này được dùng để nhận diện vật thể, còn bài toán ``có nên cảnh báo hay không'' sẽ do lớp \textbf{Decision Engine} xử lý. Điều này giúp hệ thống linh hoạt hơn và đúng với nhu cầu thực tế của người dùng.
+
+\section*{6. Thuật toán ra quyết định cảnh báo}
+\subsection*{6.1. Ý tưởng chính}
+Nếu chỉ đọc trực tiếp mọi nhãn mà mô hình phát hiện được, hệ thống sẽ tạo ra quá nhiều thông báo và nhiều trong số đó không hữu ích cho việc di chuyển. Vì vậy, cần xây dựng một lớp logic trung gian để trả lời bốn câu hỏi:
+\begin{itemize}
+    \item Vật thể nào thực sự liên quan đến an toàn di chuyển?
+    \item Vật thể đó đang ở gần hay xa?
+    \item Vật thể đó nằm ở đâu trong khung hình?
+    \item Trong nhiều vật thể xuất hiện cùng lúc, vật nào cần được cảnh báo trước?
+\end{itemize}
+
+\subsection*{6.2. Bước 1 -- Lọc vật thể theo danh sách ưu tiên}
+Hệ thống không cảnh báo toàn bộ các lớp vật thể do mô hình trả về. Chỉ các lớp có liên quan trực tiếp đến quá trình di chuyển mới được giữ lại. Danh sách ưu tiên đề xuất như sau:
+
+\begin{center}
+\begin{tabularx}{0.96\textwidth}{|>{\raggedright\arraybackslash}p{3cm}|X|}
+\hline
+\textbf{Nhóm} & \textbf{Ví dụ lớp vật thể} \\ \hline
+Ưu tiên cao & person, bicycle, motorcycle, car, bus, truck \\ \hline
+Ưu tiên trung bình & chair, bench, suitcase, potted plant, vật cản tĩnh lớn \\ \hline
+Bỏ qua trong giai đoạn đầu & bottle, cup, cat, dog, remote, tv và các vật nhỏ không ảnh hưởng lối đi \\ \hline
+\end{tabularx}
+\end{center}
+
+\subsection*{6.3. Bước 2 -- Ước lượng mức gần--xa tương đối}
+Vì hệ thống chỉ dùng một camera RGB và mô hình nhận diện vật thể, đề tài không đo khoảng cách thật theo đơn vị mét. Thay vào đó, mức gần--xa được ước lượng bằng các đặc trưng thị giác sau:
+\begin{itemize}
+    \item \textbf{Diện tích bounding box:} vật càng chiếm nhiều diện tích trong ảnh thì càng có xu hướng ở gần.
+    \item \textbf{Chiều cao bounding box:} vật thể cao hơn trong ảnh thường ở gần hơn đối với cùng một loại vật thể.
+    \item \textbf{Vị trí theo trục dọc:} vật nằm thấp ở nửa dưới khung hình có khả năng gần hướng di chuyển hơn.
+\end{itemize}
+
+Một luật đơn giản có thể được sử dụng như sau:
+\begin{itemize}
+    \item \textbf{Gần:} diện tích bbox lớn hoặc tâm vật nằm ở vùng thấp và trung tâm khung hình.
+    \item \textbf{Trung bình:} kích thước bbox ở mức vừa, nằm trong vùng quan tâm.
+    \item \textbf{Xa:} bbox nhỏ, nằm cao trong ảnh hoặc xa khỏi vùng di chuyển chính.
+\end{itemize}
+
+\subsection*{6.4. Bước 3 -- Xác định vị trí trái, giữa, phải}
+Tâm của bbox được dùng để chia khung hình thành ba vùng ngang:
+\begin{itemize}
+    \item \textbf{Trái:} vật có tâm nằm trong 1/3 bên trái ảnh.
+    \item \textbf{Giữa:} vật có tâm nằm trong 1/3 giữa ảnh; đây là vùng nguy hiểm cao nhất.
+    \item \textbf{Phải:} vật có tâm nằm trong 1/3 bên phải ảnh.
+\end{itemize}
+
+\subsection*{6.5. Bước 4 -- Tính điểm nguy hiểm}
+Sau khi có loại vật thể, độ tin cậy, vị trí và mức gần--xa, hệ thống tính \textbf{điểm ưu tiên cảnh báo} cho từng vật thể. Một công thức đơn giản có thể biểu diễn như sau:
+\[
+Priority = w_1 \cdot ClassWeight + w_2 \cdot DistanceWeight + w_3 \cdot CenterWeight + w_4 \cdot Confidence
+\]
+Trong đó:
+\begin{itemize}
+    \item \textbf{ClassWeight} ưu tiên người và phương tiện hơn các vật nhỏ.
+    \item \textbf{DistanceWeight} ưu tiên vật ở gần hơn vật ở xa.
+    \item \textbf{CenterWeight} ưu tiên vật ở giữa khung hình hơn vật ở rìa.
+    \item \textbf{Confidence} là độ tin cậy do mô hình nhận diện trả về.
+\end{itemize}
+
+Vật thể có điểm ưu tiên cao nhất sẽ được chọn làm \textbf{đối tượng cần cảnh báo chính} tại thời điểm hiện tại.
+
+\subsection*{6.6. Bước 5 -- Cơ chế chống lặp âm thanh}
+Để tránh phát âm thanh liên tục gây khó chịu cho người dùng, hệ thống áp dụng các nguyên tắc sau:
+\begin{itemize}
+    \item Không lặp lại cùng một câu cảnh báo trong khoảng 2--3 giây.
+    \item Chỉ đọc lại khi vật thể mới xuất hiện hoặc mức nguy hiểm tăng lên.
+    \item Nếu nhiều khung hình liên tiếp cho cùng một vật thể, hệ thống chỉ giữ trạng thái theo dõi thay vì lặp cảnh báo liên tục.
+\end{itemize}
+
+\section*{7. Thiết kế phần mềm và chiến lược cập nhật mã nguồn}
+Mã nguồn nên được tổ chức theo các mô-đun độc lập để dễ kiểm thử, dễ mở rộng và dễ chuyển từ máy tính thử nghiệm sang Raspberry Pi.
+
+\subsection*{7.1. Cấu trúc đề xuất}
+\begin{verbatim}
+project/
+|-- main.py
+|-- detector.py
+|-- decision_engine.py
+|-- tts_engine.py
+|-- config.py
+|-- utils.py
+`-- models/
+    `-- efficientdet_lite0.tflite
+\end{verbatim}
+
+\subsection*{7.2. Vai trò từng mô-đun}
+\begin{itemize}
+    \item \textbf{main.py:} điều phối camera, mô hình, decision engine và TTS.
+    \item \textbf{detector.py:} tải model, nhận frame đầu vào, trả về danh sách detection thô.
+    \item \textbf{decision\_engine.py:} lọc đối tượng, ước lượng gần--xa, chấm điểm nguy hiểm và sinh thông điệp cảnh báo.
+    \item \textbf{tts\_engine.py:} quản lý Text-to-Speech và cơ chế cooldown.
+    \item \textbf{config.py:} chứa các ngưỡng như score threshold, danh sách lớp ưu tiên, trọng số ưu tiên.
+\end{itemize}
+
+\subsection*{7.3. Chiến lược cập nhật mã nguồn}
+\begin{enumerate}[itemsep=3pt]
+    \item \textbf{Giai đoạn 1 -- Chạy được object detection ổn định:} kiểm tra tải model, camera, hiển thị bbox và nhãn.
+    \item \textbf{Giai đoạn 2 -- Thêm decision engine:} chỉ cảnh báo đối tượng thuộc danh sách ưu tiên; ước lượng gần--xa và trái--giữa--phải.
+    \item \textbf{Giai đoạn 3 -- Tối ưu trải nghiệm cảnh báo:} chọn một vật thể nguy hiểm nhất, thêm cooldown âm thanh, tránh lặp câu nói.
+    \item \textbf{Giai đoạn 4 -- Tinh chỉnh trên Raspberry Pi:} giảm độ phân giải, chỉ suy luận mỗi 2 khung hình, điều chỉnh ngưỡng để tăng tốc độ.
+\end{enumerate}
+
+\section*{8. Kế hoạch kiểm thử và đánh giá}
+\subsection*{8.1. Mục tiêu kiểm thử}
+Kiểm thử nhằm xác nhận rằng hệ thống không chỉ nhận diện được vật thể, mà còn đưa ra cảnh báo đúng đối tượng, đúng mức độ ưu tiên và đúng lúc.
+
+\subsection*{8.2. Các tình huống kiểm thử đề xuất}
+\begin{center}
+\begin{tabularx}{\textwidth}{|p{1.2cm}|X|X|X|}
+\hline
+\textbf{STT} & \textbf{Tình huống} & \textbf{Kết quả mong đợi} & \textbf{Tiêu chí đánh giá} \\ \hline
+1 & Một người đứng giữa lối đi ở khoảng cách gần & Hệ thống phát ``Có người phía trước'' hoặc ``Cẩn thận, có người ở gần'' & Nhận diện đúng lớp person, ưu tiên cảnh báo cao \\ \hline
+2 & Xe máy nằm ở mép phải khung hình & Hệ thống phát ``Có xe máy bên phải'' & Xác định đúng vị trí phải, không nhầm với vật nhỏ khác \\ \hline
+3 & Ghế ở xa trong hành lang & Hệ thống có thể cảnh báo mức ưu tiên thấp hơn hoặc bỏ qua nếu không nằm trên hướng di chuyển chính & Logic lọc đối tượng hoạt động hợp lý \\ \hline
+4 & Nhiều vật thể cùng lúc: người ở giữa, xe đạp ở rìa trái & Hệ thống ưu tiên người ở giữa & Thuật toán chọn vật thể ưu tiên hoạt động đúng \\ \hline
+5 & Một vật thể đứng yên trong nhiều giây & Hệ thống không lặp cảnh báo liên tục & Cooldown âm thanh hoạt động đúng \\ \hline
+\end{tabularx}
+\end{center}
+
+\subsection*{8.3. Chỉ số đánh giá gợi ý}
+\begin{itemize}
+    \item Tỷ lệ nhận diện đúng các lớp vật thể ưu tiên.
+    \item Tỷ lệ cảnh báo đúng vật thể nguy hiểm nhất trong khung hình.
+    \item Độ trễ từ lúc vật thể xuất hiện đến lúc phát cảnh báo.
+    \item Tính dễ hiểu và mức độ chấp nhận được của câu cảnh báo giọng nói.
+\end{itemize}
+
+\section*{9. Kế hoạch thực hiện trong 2 tuần}
+\begin{center}
+\begin{tabularx}{\textwidth}{|p{2cm}|X|X|}
+\hline
+\textbf{Thời gian} & \textbf{Nội dung công việc} & \textbf{Kết quả mong đợi} \\ \hline
+Tuần 1 & Chuẩn bị Raspberry Pi, camera, loa; cài đặt môi trường Python; tải và chạy thử EfficientDet-Lite0; kiểm tra camera và hiển thị bbox, label trên màn hình; xây dựng module detector riêng. & Camera hoạt động ổn định, mô hình phát hiện được các đối tượng chính, khung nhận diện hiển thị chính xác. \\ \hline
+Tuần 2 & Xây dựng decision engine; thêm logic gần--xa, trái--giữa--phải, chọn đối tượng ưu tiên; tích hợp Text-to-Speech; kiểm thử trong một số bối cảnh thực tế; tinh chỉnh thông báo và hoàn thiện báo cáo. & Hệ thống chạy độc lập, phát cảnh báo giọng nói hợp lý, giảm lặp âm thanh và có báo cáo mô tả rõ kiến trúc cũng như thuật toán. \\ \hline
+\end{tabularx}
+\end{center}
+
+\section*{10. Kết luận và hướng mở rộng}
+Đề tài có tính khả thi cao trong phạm vi thời gian ngắn vì tận dụng mô hình \textit{pre-trained}, phần cứng phổ biến và pipeline triển khai đơn giản. Giá trị cốt lõi của hệ thống không chỉ nằm ở nhận diện vật thể, mà ở việc xây dựng lớp suy luận quyết định cảnh báo phù hợp với bối cảnh di chuyển của người khiếm thị. Đây là điểm làm cho sản phẩm gần với một hệ thống hỗ trợ thực tế hơn là một chương trình demo thị giác máy tính đơn thuần.
+
+Trong tương lai, nhóm có thể mở rộng theo các hướng sau:
+\begin{itemize}
+    \item Bổ sung mô hình ước lượng độ sâu hoặc stereo camera để cải thiện đánh giá khoảng cách.
+    \item Huấn luyện hoặc tinh chỉnh mô hình với dữ liệu thực tế tại Việt Nam để tăng độ phù hợp.
+    \item Bổ sung rung phản hồi hoặc tai nghe dẫn hướng nếu cần tăng mức hỗ trợ.
+    \item Tối ưu hệ thống để chạy ổn định hơn trong môi trường ánh sáng phức tạp.
+\end{itemize}
+
+\end{document}
